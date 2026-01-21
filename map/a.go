@@ -19,7 +19,7 @@ func main() {
 	delete(m2, "a")
 	fmt.Printf("%v\n", m2)
 
-	var m3 map[string]int //此时的默认值是nil,此时没有分配存储空间，所以不能执行赋值
+	var m3 map[string]int //此时的默认值是nil,此时没有分配存储空间，所以不能执行赋值.
 	fmt.Printf("%v", m3)
 
 }
