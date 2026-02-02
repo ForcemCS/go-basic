@@ -1,0 +1,25 @@
+// hello.proto
+syntax = "proto3";
+
+// 指定生成的 Go 代码放在哪个包里
+option go_package = "my-grpc-demo/pb";
+
+package hello;
+
+// 1. 定义发送的消息（类似于定义 struct）
+message HelloRequest {
+  string name = 1; // 这里的 1 是编号，不是值
+}
+
+// 2. 定义返回的消息
+message HelloResponse {
+  string reply = 1;
+}
+
+// 3. 定义服务（类似于 interface）
+service Greeter {
+  // 定义一个函数 SayHello，接收 HelloRequest，返回 HelloResponse
+  rpc SayHello (HelloRequest) returns (HelloResponse);
+}
+
+//protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative  proto/hello.proto
