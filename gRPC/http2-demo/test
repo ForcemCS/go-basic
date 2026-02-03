@@ -1,0 +1,140 @@
+package main
+
+import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"fmt"
+	"io"
+	"log"
+	"math/big"
+	"net/http"
+	"time"
+)
+
+// 服务器地址
+const serverAddr = "localhost:8443"
+
+func main() {
+	// --- 1. 为服务器生成自签名证书 ---
+	certPEM, keyPEM, err := generateSelfSignedCert()
+	if err != nil {
+		log.Fatalf("无法生成证书: %v", err)
+	}
+
+	// 从 PEM 数据创建 tls.Certificate 对象
+	serverCert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		log.Fatalf("无法加载密钥对: %v", err)
+	}
+
+	// --- 2. 配置并启动 HTTP/2 服务器 ---
+	// 在一个单独的 goroutine 中运行服务器，这样 main 函数可以继续执行客户端逻辑
+	go func() {
+		// 定义一个简单的处理器，它会打印出请求使用的协议版本
+		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			log.Printf("[服务器] 收到来自 %s 的请求", r.RemoteAddr)
+			fmt.Fprintf(w, "你好，世界！你的请求协议是: %s", r.Proto)
+		})
+
+		// 创建一个自定义的 http.Server
+		server := &http.Server{
+			Addr: serverAddr,
+			// 配置 TLS，使用我们刚刚生成的证书
+			TLSConfig: &tls.Config{
+				Certificates: []tls.Certificate{serverCert},
+			},
+		}
+
+		log.Printf("[服务器] 正在 %s 上启动 HTTPS 服务器...\n", serverAddr)
+		// 使用 ListenAndServeTLS 启动服务器。因为 TLSConfig 已经配置，所以证书和密钥文件路径可以为空。
+		if err := server.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("[服务器] 启动失败: %v", err)
+		}
+	}()
+
+	// 等待一小段时间，确保服务器已经完全启动
+	time.Sleep(1 * time.Second)
+
+	// --- 3. 配置并运行 HTTP/2 客户端 ---
+	// 创建一个证书池，并添加我们服务器的自签名证书
+	// 这是为了让客户端信任我们的服务器，否则会报证书错误
+	certPool := x509.NewCertPool()
+	if ok := certPool.AppendCertsFromPEM(certPEM); !ok {
+		log.Fatal("无法将服务器证书添加到客户端证书池")
+	}
+
+	// 创建一个自定义的 http.Client
+	// 它使用一个特殊的 Transport 来信任我们的自签名证书
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs: certPool, // 设置信任的根证书
+			},
+			// Go 的 http.Transport 默认会尝试 HTTP/2，所以这里不需要额外设置
+			// ForceAttemptHTTP2: true, // 默认就是 true
+		},
+	}
+
+	log.Println("[客户端] 正在向服务器发送请求...")
+	// 使用 https:// schema 来发起请求
+	resp, err := client.Get("https://" + serverAddr)
+	if err != nil {
+		log.Fatalf("[客户端] 请求失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	log.Printf("[客户端] 收到响应状态码: %s", resp.Status)
+
+	// 读取并打印响应体
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatalf("[客户端] 读取响应体失败: %v", err)
+	}
+
+	fmt.Println("---------------------------------")
+	fmt.Printf("服务器响应内容:\n%s\n", string(body))
+	fmt.Println("---------------------------------")
+}
+
+// generateSelfSignedCert 在内存中生成一个自签名的 TLS 证书和私钥。
+// 返回 PEM 格式的证书和私钥。
+func generateSelfSignedCert() (certPEM, keyPEM []byte, err error) {
+	// 生成 RSA 私钥
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// 创建一个证书模板
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			Organization: []string{"我的测试公司"},
+		},
+		NotBefore: time.Now(),
+		NotAfter:  time.Now().Add(time.Hour * 24 * 365), // 证书有效期一年
+
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		DNSNames:              []string{"localhost"}, // 证书适用的域名
+	}
+
+	// 使用模板和私钥创建证书
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// 将证书编码为 PEM 格式
+	certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
+
+	// 将私钥编码为 PEM 格式
+	keyPEM = pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)})
+
+	return certPEM, keyPEM, nil
+}
