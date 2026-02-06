@@ -1,0 +1,76 @@
+// 指定使用 proto3 语法
+syntax = "proto3";
+
+// 包名，生成的 Go 代码会使用这个路径
+package user;
+
+// 导入官方预定义的 "Well-Known Types"
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+// 为了让生成的 Go 代码有更清晰的包路径
+option go_package = "github.com/your-username/protobuf-learning-project/internal/user";
+
+// --- 枚举 (Enum) ---
+// 定义账户状态，演示了 0 值、别名和保留字
+enum AccountStatus {
+  // 最佳实践：0 值保留给 "未指定"，防止忘记赋值时产生意外的业务逻辑
+  STATUS_UNSPECIFIED = 0;
+  STATUS_ACTIVE = 1;
+  STATUS_INACTIVE = 2;
+  
+  // 演示保留值和名称，防止未来被误用
+  reserved 3;
+  reserved "STATUS_DEPRECATED";
+
+  // 演示别名：允许两个名字指向同一个数值
+  option allow_alias = true;
+  STATUS_LATEST_ACTIVE = 1; // LATEST_ACTIVE 是 ACTIVE 的别名
+}
+
+// --- 消息 (Message) ---
+// 定义一个复杂的用户档案，涵盖所有讨论过的特性
+message UserProfile {
+  // --- 基础与标量类型 ---
+  // Tag 1-15 使用 1 字节编码，应留给最常用的字段
+  string user_id = 1; // 使用 string 存储 UUID
+  string full_name = 16; // 故意使用一个大于15的 tag
+
+  // --- oneof ---
+  // 联系方式：三选一，完美契合 oneof 的场景
+  oneof contact_method {
+    string email = 2;
+    string phone_number = 3;
+  }
+
+  // --- 枚举 (Enum) ---
+  AccountStatus status = 4;
+
+  // --- 映射 (Map) ---
+  // 使用 map 存储用户自定义属性，如 "theme": "dark", "language": "en"
+  map<string, string> attributes = 5;
+  
+  // --- Well-Known Types ---
+  // 使用 Timestamp 标准类型来表示时间，避免混淆
+  google.protobuf.Timestamp last_login_time = 6;
+  
+  // --- Wrapper Types vs optional ---
+  // 老方法：使用 Wrapper Type 来区分“未设置”和“零值”
+  // 在 Go 中会生成一个指针类型 *StringValue
+  google.protobuf.StringValue nickname = 7;
+  // 新方法：使用 optional 关键字，效果类似，但语法更简洁
+  optional int32 age = 8;
+  
+  // --- 不同整数类型的演示 ---
+  // 适合存储大多数不确定范围的正整数
+  int32 follower_count = 9;
+  // 适合存储总是很大的数（如文件大小、某些hash值），因为它长度固定
+  fixed32 profile_version = 11;
+  // 适合存储可能为负数的变量（如分数变化、温度），对负数编码效率极高
+  sint32 login_attempts_delta = 12;
+
+  // --- 保留字段 ---
+  // 明确指出 tag 10 和 13-15，以及字段名 "legacy_id" 已被废弃，不可再用
+  reserved 10, 13 to 15;
+  reserved "legacy_id";
+}
